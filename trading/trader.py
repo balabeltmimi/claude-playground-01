@@ -16,7 +16,7 @@ import yfinance as yf
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-WATCHLIST = ["AAPL", "NVDA", "MSFT", "TSLA"]
+WATCHLIST = ["AAPL", "NVDA", "MSFT", "GOOGL", "META"]
 
 RISK = {
     "max_per_trade":      100.0,   # USD per position
@@ -34,7 +34,7 @@ SIGNAL = {
 MARKET_OPEN  = dtime(10, 0)        # EST — avoid open volatility
 MARKET_CLOSE = dtime(15, 30)       # EST — avoid close volatility
 
-AUTO_EXECUTE = False               # Set True to enable real paper-trade orders
+AUTO_EXECUTE = True                # Executes real orders on Alpaca Paper Trading
 
 SIGNALS_CSV  = "signals.csv"
 EST          = ZoneInfo("America/New_York")
@@ -97,6 +97,13 @@ def get_price(symbol: str) -> float | None:
     info = yf.Ticker(symbol).fast_info
     return float(info.last_price) if info.last_price else None
 
+
+def get_ma50(symbol: str) -> float | None:
+    df = yf.download(symbol, period="90d", interval="1d", progress=False, auto_adjust=True)
+    if df.empty or len(df) < 50:
+        return None
+    return float(df["Close"].squeeze().rolling(50).mean().iloc[-1])
+
 # ── News sentiment ─────────────────────────────────────────────────────────────
 
 def get_sentiment(symbol: str) -> float | None:
@@ -122,10 +129,12 @@ def get_sentiment(symbol: str) -> float | None:
 
 # ── Signal logic ───────────────────────────────────────────────────────────────
 
-def should_buy(symbol: str, rsi: float, sentiment: float | None) -> bool:
-    if sentiment is None:
+def should_buy(symbol: str, rsi: float, sentiment: float | None,
+               price: float, ma50: float | None) -> bool:
+    if sentiment is None or ma50 is None:
         return False
-    return rsi < SIGNAL["rsi_buy"] and sentiment > SIGNAL["sentiment_min"]
+    above_ma50 = price > ma50   # only buy in uptrend
+    return rsi < SIGNAL["rsi_buy"] and sentiment > SIGNAL["sentiment_min"] and above_ma50
 
 
 def should_sell(symbol: str, rsi: float, position: dict | None) -> bool:
@@ -183,13 +192,17 @@ def run_once() -> None:
         rsi       = get_rsi(symbol)
         price     = get_price(symbol)
         sentiment = get_sentiment(symbol)
+        ma50      = get_ma50(symbol)
 
         if rsi is None or price is None:
             log.warning("%s  Could not fetch data, skipping.", symbol)
             continue
 
-        log.info("%s  RSI=%.1f  sentiment=%s  price=%.2f",
-                 symbol, rsi, f"{sentiment:.3f}" if sentiment is not None else "n/a", price)
+        trend = "uptrend" if (ma50 and price > ma50) else "downtrend"
+        log.info("%s  RSI=%.1f  sentiment=%s  price=%.2f  MA50=%.2f  %s",
+                 symbol, rsi,
+                 f"{sentiment:.3f}" if sentiment is not None else "n/a",
+                 price, ma50 or 0, trend)
 
         in_position = symbol in positions
 
@@ -204,7 +217,7 @@ def run_once() -> None:
 
         # ── Buy check ──
         elif not in_position and open_count < RISK["max_open_positions"]:
-            if should_buy(symbol, rsi, sentiment):
+            if should_buy(symbol, rsi, sentiment, price, ma50):
                 qty = max(1, int(RISK["max_per_trade"] / price))
                 executed = False
                 if AUTO_EXECUTE:

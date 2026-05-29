@@ -17,7 +17,7 @@ import yfinance as yf
 
 # ── Default settings (mirrors trader.py) ──────────────────────────────────────
 
-DEFAULT_SYMBOLS   = ["AAPL", "NVDA", "MSFT", "TSLA"]
+DEFAULT_SYMBOLS   = ["AAPL", "NVDA", "MSFT", "GOOGL", "META"]
 DEFAULT_START     = "2023-01-01"
 DEFAULT_END       = str(date.today())
 
@@ -49,6 +49,10 @@ def compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
+def compute_ma50(close: pd.Series) -> pd.Series:
+    return close.rolling(50).mean()
+
+
 def generate_synthetic_prices(symbol: str, start: str, end: str,
                                seed: int | None = None) -> pd.DataFrame:
     """
@@ -56,10 +60,12 @@ def generate_synthetic_prices(symbol: str, start: str, end: str,
     Starting prices and volatility are calibrated to approximate real stocks.
     """
     params = {
-        "AAPL": (185.0, 0.013, 0.0003),
-        "NVDA": (495.0, 0.022, 0.0007),
-        "MSFT": (375.0, 0.012, 0.0003),
-        "TSLA": (250.0, 0.028, 0.0002),
+        "AAPL":  (185.0, 0.013, 0.0003),
+        "NVDA":  (495.0, 0.022, 0.0007),
+        "MSFT":  (375.0, 0.012, 0.0003),
+        "TSLA":  (250.0, 0.028, 0.0002),
+        "GOOGL": (140.0, 0.013, 0.0003),
+        "META":  (350.0, 0.018, 0.0005),
     }
     s0, vol, drift = params.get(symbol, (100.0, 0.015, 0.0003))
 
@@ -171,14 +177,16 @@ def run_backtest(symbols: list[str], start: str, end: str) -> Portfolio:
             print(f"  {symbol}: not enough data, skipping.")
             continue
 
-        close     = df["Close"].squeeze()
+        close      = df["Close"].squeeze()
         rsi_series = compute_rsi(close)
+        ma50_series = compute_ma50(close)
         sentiments = simulate_sentiment(len(df))
 
-        for i in range(15, len(df)):
+        for i in range(50, len(df)):
             dt      = str(df.index[i].date())
             price   = float(close.iloc[i])
             rsi     = float(rsi_series.iloc[i])
+            ma50    = float(ma50_series.iloc[i])
             sent    = sentiments[i]
             in_pos  = symbol in portfolio.open_pos
 
@@ -206,7 +214,7 @@ def run_backtest(symbols: list[str], start: str, end: str) -> Portfolio:
                 open_count = len(portfolio.open_pos)
                 if open_count >= RISK["max_open_positions"]:
                     continue
-                if rsi < SIGNAL["rsi_buy"] and sent > SIGNAL["sentiment_min"]:
+                if rsi < SIGNAL["rsi_buy"] and sent > SIGNAL["sentiment_min"] and price > ma50:
                     qty = max(1, int(RISK["max_per_trade"] / price))
                     trade = Trade(
                         symbol=symbol,
