@@ -17,7 +17,7 @@ import yfinance as yf
 
 # ── Default settings (mirrors trader.py) ──────────────────────────────────────
 
-DEFAULT_SYMBOLS   = ["AAPL", "NVDA", "MSFT", "TSLA"]
+DEFAULT_SYMBOLS   = ["AAPL", "NVDA", "MSFT"]
 DEFAULT_START     = "2023-01-01"
 DEFAULT_END       = str(date.today())
 

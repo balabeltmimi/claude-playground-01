@@ -16,7 +16,7 @@ import yfinance as yf
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-WATCHLIST = ["AAPL", "NVDA", "MSFT", "TSLA"]
+WATCHLIST = ["AAPL", "NVDA", "MSFT"]
 
 RISK = {
     "max_per_trade":      100.0,   # USD per position
