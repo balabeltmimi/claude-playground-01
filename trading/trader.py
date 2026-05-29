@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 
+import anthropic
 import requests
 import yfinance as yf
 
@@ -106,8 +107,8 @@ def get_ma50(symbol: str) -> float | None:
 
 # ── News sentiment ─────────────────────────────────────────────────────────────
 
-def get_sentiment(symbol: str) -> float | None:
-    """Returns Alpha Vantage overall_sentiment_score (-1 to +1), or None on error."""
+def get_sentiment(symbol: str) -> tuple[float | None, list[str]]:
+    """Returns (avg_sentiment_score, headlines). Score is -1 to +1, or None on error."""
     api_key = os.environ["ALPHAVANTAGE_API_KEY"]
     url = (
         "https://www.alphavantage.co/query"
@@ -118,14 +119,43 @@ def get_sentiment(symbol: str) -> float | None:
     data = r.json()
     feed = data.get("feed", [])
     if not feed:
-        return None
-    scores = [
-        float(ts["ticker_sentiment_score"])
-        for article in feed
-        for ts in article.get("ticker_sentiment", [])
-        if ts["ticker"] == symbol
-    ]
-    return sum(scores) / len(scores) if scores else None
+        return None, []
+    scores = []
+    headlines = []
+    for article in feed:
+        headlines.append(article.get("title", ""))
+        for ts in article.get("ticker_sentiment", []):
+            if ts["ticker"] == symbol:
+                scores.append(float(ts["ticker_sentiment_score"]))
+    avg = sum(scores) / len(scores) if scores else None
+    return avg, headlines[:5]
+
+
+def summarize_trade_reason(symbol: str, price: float, rsi: float,
+                            sentiment: float, ma50: float,
+                            headlines: list[str]) -> str:
+    """Calls Claude to generate a 2-3 sentence rationale for a BUY entry."""
+    try:
+        client = anthropic.Anthropic()
+        trend = "above" if price > ma50 else "below"
+        news_text = "; ".join(h for h in headlines if h) or "no recent headlines available"
+        prompt = (
+            f"Stock: {symbol}\n"
+            f"Price: ${price:.2f}  RSI: {rsi:.1f}  Sentiment score: {sentiment:.3f}\n"
+            f"Price is {trend} its 50-day MA (${ma50:.2f})\n"
+            f"Recent headlines: {news_text}\n\n"
+            "In 2-3 concise sentences, explain why this is a good BUY entry point "
+            "based on the technical indicators and news sentiment above."
+        )
+        response = client.messages.create(
+            model="claude-opus-4-8",
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()
+    except Exception as e:
+        log.warning("Claude reasoning unavailable: %s", e)
+        return ""
 
 # ── Signal logic ───────────────────────────────────────────────────────────────
 
@@ -156,12 +186,13 @@ def should_sell(symbol: str, rsi: float, position: dict | None) -> bool:
 # ── CSV logging ────────────────────────────────────────────────────────────────
 
 def log_signal(symbol: str, action: str, price: float | None,
-               rsi: float | None, sentiment: float | None, executed: bool) -> None:
+               rsi: float | None, sentiment: float | None, executed: bool,
+               reasoning: str = "") -> None:
     file_exists = os.path.isfile(SIGNALS_CSV)
     with open(SIGNALS_CSV, "a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(["timestamp", "symbol", "action", "price", "rsi", "sentiment", "executed"])
+            writer.writerow(["timestamp", "symbol", "action", "price", "rsi", "sentiment", "executed", "reasoning"])
         writer.writerow([
             datetime.now(EST).isoformat(),
             symbol,
@@ -170,6 +201,7 @@ def log_signal(symbol: str, action: str, price: float | None,
             f"{rsi:.2f}"   if rsi is not None else "",
             f"{sentiment:.4f}" if sentiment is not None else "",
             executed,
+            reasoning,
         ])
 
 # ── Market hours check ─────────────────────────────────────────────────────────
@@ -189,10 +221,10 @@ def run_once() -> None:
     open_count = len(positions)
 
     for symbol in WATCHLIST:
-        rsi       = get_rsi(symbol)
-        price     = get_price(symbol)
-        sentiment = get_sentiment(symbol)
-        ma50      = get_ma50(symbol)
+        rsi                 = get_rsi(symbol)
+        price               = get_price(symbol)
+        sentiment, headlines = get_sentiment(symbol)
+        ma50                = get_ma50(symbol)
 
         if rsi is None or price is None:
             log.warning("%s  Could not fetch data, skipping.", symbol)
@@ -219,13 +251,18 @@ def run_once() -> None:
         elif not in_position and open_count < RISK["max_open_positions"]:
             if should_buy(symbol, rsi, sentiment, price, ma50):
                 qty = max(1, int(RISK["max_per_trade"] / price))
+                reasoning = summarize_trade_reason(
+                    symbol, price, rsi, sentiment or 0.0, ma50 or price, headlines
+                )
                 executed = False
                 if AUTO_EXECUTE:
                     place_order(symbol, "buy", qty)
                     executed = True
                     open_count += 1
                 log.info("BUY signal  %s  qty=%d  executed=%s", symbol, qty, executed)
-                log_signal(symbol, "BUY", price, rsi, sentiment, executed)
+                if reasoning:
+                    log.info("Trade rationale: %s", reasoning)
+                log_signal(symbol, "BUY", price, rsi, sentiment, executed, reasoning)
 
         time.sleep(1)   # respect API rate limits between tickers
 
