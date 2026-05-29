@@ -17,7 +17,7 @@ import yfinance as yf
 
 # ── Default settings (mirrors trader.py) ──────────────────────────────────────
 
-DEFAULT_SYMBOLS   = ["AAPL", "NVDA", "MSFT"]
+DEFAULT_SYMBOLS   = ["AAPL", "NVDA", "MSFT", "GOOGL", "META"]
 DEFAULT_START     = "2023-01-01"
 DEFAULT_END       = str(date.today())
 
@@ -56,10 +56,12 @@ def generate_synthetic_prices(symbol: str, start: str, end: str,
     Starting prices and volatility are calibrated to approximate real stocks.
     """
     params = {
-        "AAPL": (185.0, 0.013, 0.0003),
-        "NVDA": (495.0, 0.022, 0.0007),
-        "MSFT": (375.0, 0.012, 0.0003),
-        "TSLA": (250.0, 0.028, 0.0002),
+        "AAPL":  (185.0, 0.013, 0.0003),
+        "NVDA":  (495.0, 0.022, 0.0007),
+        "MSFT":  (375.0, 0.012, 0.0003),
+        "TSLA":  (250.0, 0.028, 0.0002),
+        "GOOGL": (140.0, 0.013, 0.0003),
+        "META":  (350.0, 0.018, 0.0005),
     }
     s0, vol, drift = params.get(symbol, (100.0, 0.015, 0.0003))
 

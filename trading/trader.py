@@ -16,7 +16,7 @@ import yfinance as yf
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-WATCHLIST = ["AAPL", "NVDA", "MSFT"]
+WATCHLIST = ["AAPL", "NVDA", "MSFT", "GOOGL", "META"]
 
 RISK = {
     "max_per_trade":      100.0,   # USD per position
@@ -34,7 +34,7 @@ SIGNAL = {
 MARKET_OPEN  = dtime(10, 0)        # EST — avoid open volatility
 MARKET_CLOSE = dtime(15, 30)       # EST — avoid close volatility
 
-AUTO_EXECUTE = False               # Set True to enable real paper-trade orders
+AUTO_EXECUTE = True                # Executes real orders on Alpaca Paper Trading
 
 SIGNALS_CSV  = "signals.csv"
 EST          = ZoneInfo("America/New_York")
