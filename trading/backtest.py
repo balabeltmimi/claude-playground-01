@@ -49,6 +49,10 @@ def compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
+def compute_ma50(close: pd.Series) -> pd.Series:
+    return close.rolling(50).mean()
+
+
 def generate_synthetic_prices(symbol: str, start: str, end: str,
                                seed: int | None = None) -> pd.DataFrame:
     """
@@ -173,14 +177,16 @@ def run_backtest(symbols: list[str], start: str, end: str) -> Portfolio:
             print(f"  {symbol}: not enough data, skipping.")
             continue
 
-        close     = df["Close"].squeeze()
+        close      = df["Close"].squeeze()
         rsi_series = compute_rsi(close)
+        ma50_series = compute_ma50(close)
         sentiments = simulate_sentiment(len(df))
 
-        for i in range(15, len(df)):
+        for i in range(50, len(df)):
             dt      = str(df.index[i].date())
             price   = float(close.iloc[i])
             rsi     = float(rsi_series.iloc[i])
+            ma50    = float(ma50_series.iloc[i])
             sent    = sentiments[i]
             in_pos  = symbol in portfolio.open_pos
 
@@ -208,7 +214,7 @@ def run_backtest(symbols: list[str], start: str, end: str) -> Portfolio:
                 open_count = len(portfolio.open_pos)
                 if open_count >= RISK["max_open_positions"]:
                     continue
-                if rsi < SIGNAL["rsi_buy"] and sent > SIGNAL["sentiment_min"]:
+                if rsi < SIGNAL["rsi_buy"] and sent > SIGNAL["sentiment_min"] and price > ma50:
                     qty = max(1, int(RISK["max_per_trade"] / price))
                     trade = Trade(
                         symbol=symbol,
